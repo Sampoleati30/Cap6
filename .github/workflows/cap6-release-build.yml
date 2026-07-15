@@ -12,6 +12,7 @@ on:
 permissions:
   contents: write
   issues: write
+  pull-requests: write
 
 jobs:
   release-apk:
@@ -53,6 +54,14 @@ jobs:
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
+      - name: Upload Gradle diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CAP6-gradle-diagnostic
+          path: gradle-build.log
+          if-no-files-found: ignore
+
       - name: Publish Gradle failure details
         if: steps.gradle_build.outputs.exit_code != '0'
         env:
@@ -65,7 +74,9 @@ jobs:
             tail -n 180 gradle-build.log
             echo '```'
           } > gradle-failure-comment.md
-          if [ "${{ github.event_name }}" = "push" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" --body-file gradle-failure-comment.md
+          else
             gh issue comment 7 --body-file gradle-failure-comment.md
           fi
           exit 1
