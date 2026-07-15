@@ -21,8 +21,8 @@ android {
         applicationId = "fr.cap6.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20400
-        versionName = "1.0.0"
+        versionCode = 20410
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
