@@ -1,6 +1,9 @@
-name: CAP 6 manual Android build
+name: CAP 6 1.1.0 controlled build
 
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -36,7 +39,7 @@ jobs:
       - name: Reconstruct sources
         run: bash scripts/reconstruct_sources.sh
 
-      - name: Build APK
+      - name: Tests, lint and APK
         run: gradle --stacktrace testDebugUnitTest lintDebug assembleDebug
 
       - name: Verify APK signature
@@ -45,14 +48,14 @@ jobs:
 
       - name: Prepare APK
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk CAP6-1.0.0.apk
-          sha256sum CAP6-1.0.0.apk > CAP6-1.0.0.apk.sha256
+          cp app/build/outputs/apk/debug/app-debug.apk CAP6-1.1.0.apk
+          sha256sum CAP6-1.1.0.apk > CAP6-1.1.0.apk.sha256
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CAP6-1.0.0
+          name: CAP6-1.1.0
           path: |
-            CAP6-1.0.0.apk
-            CAP6-1.0.0.apk.sha256
+            CAP6-1.1.0.apk
+            CAP6-1.1.0.apk.sha256
           if-no-files-found: error
