@@ -10,10 +10,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  issues: write
 
 jobs:
   android:
+    if: github.event_name != 'issues' || startsWith(github.event.issue.title, 'BUILD CAP 6')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -36,11 +38,38 @@ jobs:
         run: bash scripts/reconstruct_sources.sh
       - name: Tests, lint and APK
         run: gradle --stacktrace testDebugUnitTest lintDebug assembleDebug
-      - name: Upload APK artifact
+      - name: Verify APK signature
+        run: "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+      - name: Prepare release files
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk CAP6-1.0.0.apk
+          sha256sum CAP6-1.0.0.apk > CAP6-1.0.0.apk.sha256
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: CAP6-1.0.0-complete
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            CAP6-1.0.0.apk
+            CAP6-1.0.0.apk.sha256
           if-no-files-found: error
-      - name: Verify APK signature
-        run: "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view cap6-1.0.0 >/dev/null 2>&1; then
+            gh release upload cap6-1.0.0 CAP6-1.0.0.apk CAP6-1.0.0.apk.sha256 --clobber
+          else
+            gh release create cap6-1.0.0 CAP6-1.0.0.apk CAP6-1.0.0.apk.sha256 --target main --title "CAP 6 1.0.0" --notes "Application Android complète CAP 6 1.0.0. Les données nautiques non officielles restent signalées dans l'application."
+          fi
+      - name: Report build success
+        if: success() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: gh issue comment "$ISSUE_NUMBER" --body "✅ CAP 6 1.0.0 a été compilé, testé, signé en debug et publié dans les Releases."
+      - name: Report build failure
+        if: failure() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: gh issue comment "$ISSUE_NUMBER" --body "❌ La compilation CAP 6 1.0.0 a échoué. Consultez le dernier workflow Actions pour le journal complet."
