@@ -13,7 +13,7 @@ on:
     workflows: ["Build CAP 6 APK"]
     types: [completed]
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '34 15 * * *'
   workflow_dispatch:
 
 permissions:
