@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   android:
+    # Verification build for the complete CAP 6 1.0.0 application.
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
