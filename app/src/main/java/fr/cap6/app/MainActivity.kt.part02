@@ -1,33 +1,73 @@
 ) {
         val ports = marineData?.ports.orEmpty()
-        val items = buildList { add("Calculer vers le point choisi"); add("Choisir un port"); if (activeRoute != null) add("Détails route active"); if (activeRoute != null) add("Arrêter la route") }
+        val spots = fishingSpotStore.all()
+        val items = buildList {
+            add("Calculer vers le point choisi")
+            add("Choisir un port")
+            if (spots.isNotEmpty()) add("Choisir un spot pêche")
+            if (activeRoute != null) add("Détails route active")
+            if (activeRoute != null) add("Arrêter la route")
+        }
         AlertDialog.Builder(this).setTitle("ROUTE").setItems(items.toTypedArray()) { _, index ->
             when (items[index]) {
-                "Calculer vers le point choisi" -> calculateRoute(destination, destinationName)
-                "Choisir un port" -> AlertDialog.Builder(this).setTitle("PORTS").setItems(ports.map { it.name }.toTypedArray()) { _, i -> destination = ports[i].point; destinationName = ports[i].name; updateDestinationLayer(); calculateRoute(destination, destinationName) }.show()
+                "Calculer vers le point choisi" -> calculateRoute(destination, destinationName, destinationSpotId)
+                "Choisir un port" -> AlertDialog.Builder(this)
+                    .setTitle("PORTS")
+                    .setItems(ports.map { it.name }.toTypedArray()) { _, i ->
+                        destination = ports[i].point
+                        destinationName = ports[i].name
+                        destinationSpotId = null
+                        updateDestinationLayer()
+                        calculateRoute(destination, destinationName, null)
+                    }
+                    .show()
+                "Choisir un spot pêche" -> showFishingSpots()
                 "Détails route active" -> showRouteDetails()
-                "Arrêter la route" -> { activeRoute = null; routeStore.clear(); routeBanner.visibility = View.GONE; updateRouteLayer() }
+                "Arrêter la route" -> {
+                    activeRoute = null
+                    routeStore.clear()
+                    routeBanner.visibility = View.GONE
+                    updateRouteLayer()
+                }
             }
         }.show()
     }
 
-    private fun calculateRoute(target: GeoPoint?, name: String) {
+    private fun calculateRoute(target: GeoPoint?, name: String, spotId: Long? = destinationSpotId) {
         val start = currentPoint ?: return dialog("ROUTE NON CALCULABLE", "Position GPS indisponible.")
-        val end = target ?: return dialog("ROUTE", "Touchez longuement la carte ou choisissez un port.")
+        val end = target ?: return dialog("ROUTE", "Touchez longuement la carte, choisissez un port ou sélectionnez un spot pêche.")
         val data = marineData ?: return dialog("ROUTE", "Données locales indisponibles.")
         val stored = boatStore.load()
         val constraints = RouteConstraints(
-            landPolygons = data.landPolygons, forbiddenPolygons = emptyList(), hazards = emptyList(),
-            coastDistanceMeters = { data.coastlineIndex.nearestDistanceMeters(it) }, depthMeters = { null },
+            landPolygons = data.landPolygons,
+            forbiddenPolygons = emptyList(),
+            hazards = emptyList(),
+            coastDistanceMeters = { data.coastlineIndex.nearestDistanceMeters(it) },
+            depthMeters = { null },
             corridorNm = if (stored.permitType.contains("côt", true)) 5.5 else null,
-            corridorCriterion = CorridorCriterion.COASTLINE, requireDepthData = false
+            corridorCriterion = CorridorCriterion.COASTLINE,
+            requireDepthData = false
         )
         Toast.makeText(this, "Calcul de route…", Toast.LENGTH_SHORT).show()
         Thread {
-            val result = GridRoutePlanner().plan(start, end, BoatProfile(stored.draftMeters, stored.airDraftMeters, stored.cruiseSpeedKnots, stored.permitType.contains("côt", true)), constraints)
+            val result = GridRoutePlanner().plan(
+                start,
+                end,
+                BoatProfile(stored.draftMeters, stored.airDraftMeters, stored.cruiseSpeedKnots, stored.permitType.contains("côt", true)),
+                constraints
+            )
             runOnUiThread {
                 when (result) {
-                    is RoutePlanResult.Success -> { activeRoute = result.route; activeRouteName = name; routeStore.save(name, result.route); updateRouteLayer(); routeBanner.visibility = View.VISIBLE; routeBanner.text = "ROUTE ACTIVE — $name\n${format(result.route.distanceNm, 1)} NM — ${result.route.warnings.firstOrNull() ?: "Route calculée"}" }
+                    is RoutePlanResult.Success -> {
+                        activeRoute = result.route
+                        activeRouteName = name
+                        routeStore.save(name, result.route)
+                        spotId?.let { fishingSpotStore.saveRoute(it, result.route) }
+                        updateRouteLayer()
+                        updateFishingSpotsLayer()
+                        routeBanner.visibility = View.VISIBLE
+                        routeBanner.text = "ROUTE ACTIVE — $name\n${format(result.route.distanceNm, 1)} NM — ${result.route.warnings.firstOrNull() ?: "Route calculée"}"
+                    }
                     is RoutePlanResult.Failure -> dialog("ROUTE NON CALCULABLE", result.details.joinToString("\n").ifBlank { result.reason.name })
                 }
             }
@@ -37,16 +77,33 @@
     private fun updateNavigation(speedKnots: Double, accuracy: Double) {
         val route = activeRoute ?: return
         val point = currentPoint ?: return
-        val progress = RouteFollower.evaluate(point, route.points, speedKnots, System.currentTimeMillis(), accuracy, coastDistanceMeters, 5.5, fallbackSpeedKnots = boatStore.load().cruiseSpeedKnots) ?: return
+        val progress = RouteFollower.evaluate(
+            point,
+            route.points,
+            speedKnots,
+            System.currentTimeMillis(),
+            accuracy,
+            coastDistanceMeters,
+            5.5,
+            fallbackSpeedKnots = boatStore.load().cruiseSpeedKnots
+        ) ?: return
         val eta = progress.etaEpochMillis?.let { SimpleDateFormat("HH:mm", Locale.FRANCE).format(Date(it)) } ?: "—"
         routeBanner.visibility = View.VISIBLE
-        routeBanner.text = "ROUTE ACTIVE — $activeRouteName\nRestant ${format(progress.distanceRemainingNm, 1)} NM · ETA $eta · Écart ${format(progress.crossTrackErrorNm, 2)} NM · WP ${progress.nextWaypointIndex}"
-        if (progress.alerts.isNotEmpty()) routeBanner.setBackgroundColor(Color.rgb(160, 35, 35)) else routeBanner.setBackgroundColor(Color.rgb(111, 47, 0))
+        routeBanner.text = "ROUTE ACTIVE — $activeRouteName\nRESTE ${format(progress.distanceRemainingNm, 1)} NM   ETA $eta   XTE ${format(progress.crossTrackErrorNm, 2)} NM   WP ${progress.nextWaypointIndex}"
+        if (progress.alerts.isNotEmpty()) routeBanner.setBackgroundColor(Color.rgb(156, 32, 32))
+        else routeBanner.setBackgroundColor(Color.rgb(95, 52, 0))
     }
 
     private fun showRouteDetails() {
         val route = activeRoute ?: return
-        dialog("ROUTE ACTIVE — $activeRouteName", "Distance : ${format(route.distanceNm, 2)} NM\nCap initial : ${format(route.initialBearingDegrees, 0)}°\nDurée estimée : ${format(route.estimatedDurationMinutes, 0)} min\nMaximum côte : ${route.maximumCoastDistanceNm?.let { format(it, 2) + " NM" } ?: "inconnu"}\n\n${route.warnings.joinToString("\n")}")
+        dialog(
+            "ROUTE ACTIVE — $activeRouteName",
+            "Distance : ${format(route.distanceNm, 2)} NM\n" +
+                "Cap initial : ${format(route.initialBearingDegrees, 0)}°\n" +
+                "Durée estimée : ${format(route.estimatedDurationMinutes, 0)} min\n" +
+                "Maximum côte : ${route.maximumCoastDistanceNm?.let { format(it, 2) + " NM" } ?: "inconnu"}\n\n" +
+                route.warnings.joinToString("\n")
+        )
     }
 
     private fun showVhf() {
@@ -65,29 +122,55 @@
     }
 
     private fun emergencyDialog(title: String, text: String) {
-        AlertDialog.Builder(this).setTitle(title).setMessage(text).setPositiveButton("Copier") { _, _ -> copy(text) }.setNeutralButton("Partager") { _, _ -> share(text) }.setNegativeButton("Fermer", null).show()
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(text)
+            .setPositiveButton("Copier") { _, _ -> copy(text) }
+            .setNeutralButton("Partager") { _, _ -> share(text) }
+            .setNegativeButton("Fermer", null)
+            .show()
     }
 
     private fun showMore() {
         val items = arrayOf("Trace GPS", "Profil bateau", "Code & balisage", "Cartes hors ligne", "Mode de carte", "État des données")
-        AlertDialog.Builder(this).setTitle("PLUS").setItems(items) { _, i -> when (i) { 0 -> showTrackMenu(); 1 -> editProfile(); 2 -> showGuide(); 3 -> showOfflineRegions(); 4 -> chooseMapMode(); 5 -> showStatus() } }.show()
+        AlertDialog.Builder(this).setTitle("MENU").setItems(items) { _, i ->
+            when (i) {
+                0 -> showTrackMenu()
+                1 -> editProfile()
+                2 -> showGuide()
+                3 -> showOfflineRegions()
+                4 -> chooseMapMode()
+                5 -> showStatus()
+            }
+        }.show()
     }
 
     private fun showTrackMenu() {
-        val state = trackStore.state(); val summary = trackStore.summary()
+        val state = trackStore.state()
+        val summary = trackStore.summary()
         val items = mutableListOf<String>()
-        when (state) { TrackState.STOPPED -> items += "Démarrer une nouvelle trace"; TrackState.RECORDING -> items += listOf("Pause", "Arrêter"); TrackState.PAUSED -> items += listOf("Reprendre", "Arrêter") }
+        when (state) {
+            TrackState.STOPPED -> items += "Démarrer une nouvelle trace"
+            TrackState.RECORDING -> items += listOf("Pause", "Arrêter")
+            TrackState.PAUSED -> items += listOf("Reprendre", "Arrêter")
+        }
         items += listOf("Exporter GPX", "Effacer la trace")
-        AlertDialog.Builder(this).setTitle("TRACE GPS — ${summary.pointCount} points · ${format(summary.distanceNm, 2)} NM").setItems(items.toTypedArray()) { _, i ->
-            when (items[i]) {
-                "Démarrer une nouvelle trace" -> startTrack(true)
-                "Pause" -> serviceAction(TrackLocationService.ACTION_PAUSE)
-                "Reprendre" -> serviceAction(TrackLocationService.ACTION_RESUME)
-                "Arrêter" -> serviceAction(TrackLocationService.ACTION_STOP)
-                "Exporter GPX" -> exportGpx()
-                "Effacer la trace" -> { serviceAction(TrackLocationService.ACTION_CLEAR); updateTrackLayer() }
+        AlertDialog.Builder(this)
+            .setTitle("TRACE GPS — ${summary.pointCount} points · ${format(summary.distanceNm, 2)} NM")
+            .setItems(items.toTypedArray()) { _, i ->
+                when (items[i]) {
+                    "Démarrer une nouvelle trace" -> startTrack(true)
+                    "Pause" -> serviceAction(TrackLocationService.ACTION_PAUSE)
+                    "Reprendre" -> serviceAction(TrackLocationService.ACTION_RESUME)
+                    "Arrêter" -> serviceAction(TrackLocationService.ACTION_STOP)
+                    "Exporter GPX" -> exportGpx()
+                    "Effacer la trace" -> {
+                        serviceAction(TrackLocationService.ACTION_CLEAR)
+                        updateTrackLayer()
+                    }
+                }
             }
-        }.show()
+            .show()
     }
 
     private fun startTrack(clear: Boolean) {
