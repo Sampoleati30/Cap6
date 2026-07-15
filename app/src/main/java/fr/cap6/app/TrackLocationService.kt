@@ -63,6 +63,7 @@ class TrackLocationService : Service(), LocationListener {
         return if (store.state() == TrackState.STOPPED) START_NOT_STICKY else START_STICKY
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     private fun requestUpdates() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             store.setState(TrackState.STOPPED)
