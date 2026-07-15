@@ -1,0 +1,49 @@
+name: CAP 6 1.0.0 release build
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout complete application from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Reconstruct complete sources
+        run: bash scripts/reconstruct_sources.sh
+      - name: Unit tests, lint and complete APK
+        run: gradle --stacktrace testDebugUnitTest lintDebug assembleDebug
+      - name: Verify signature
+        run: "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+      - name: Prepare release assets
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk CAP6-1.0.0.apk
+          sha256sum CAP6-1.0.0.apk > CAP6-1.0.0.apk.sha256
+      - name: Upload installable application
+        uses: actions/upload-artifact@v4
+        with:
+          name: CAP6-1.0.0-complete
+          path: |
+            CAP6-1.0.0.apk
+            CAP6-1.0.0.apk.sha256
+          if-no-files-found: error
