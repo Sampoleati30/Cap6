@@ -2,6 +2,7 @@ package fr.cap6.app
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
@@ -40,10 +41,12 @@ class LocalAppDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NA
         db.execSQL("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         db.execSQL("INSERT INTO app_state(key,value) VALUES('track_state','STOPPED')")
         createActiveRouteTable(db)
+        createFishingSpotsTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) createActiveRouteTable(db)
+        if (oldVersion < 3) createFishingSpotsTable(db)
     }
 
     private fun createActiveRouteTable(db: SQLiteDatabase) {
@@ -54,6 +57,23 @@ class LocalAppDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NA
                 updated_at INTEGER NOT NULL
             )
         """.trimIndent())
+    }
+
+    private fun createFishingSpotsTable(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS fishing_spots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                latitude REAL NOT NULL CHECK(latitude BETWEEN -90 AND 90),
+                longitude REAL NOT NULL CHECK(longitude BETWEEN -180 AND 180),
+                notes TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                last_visited_at INTEGER,
+                route_payload TEXT
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_fishing_spots_recent ON fishing_spots(last_visited_at DESC, updated_at DESC)")
     }
 
     fun loadBoatProfile(): StoredBoatProfile? {
@@ -146,10 +166,70 @@ class LocalAppDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NA
 
     fun clearActiveRoute() { writableDatabase.delete("active_route", "id=1", null) }
 
-    private fun android.database.Cursor.index(name: String) = getColumnIndexOrThrow(name)
-    private fun android.database.Cursor.text(name: String) = getString(index(name))
-    private fun android.database.Cursor.double(name: String) = getDouble(index(name))
-    private fun android.database.Cursor.int(name: String) = getInt(index(name))
+    fun insertFishingSpot(name: String, point: GeoPoint, notes: String): Long {
+        val now = System.currentTimeMillis()
+        val values = ContentValues().apply {
+            put("name", name); put("latitude", point.latitude); put("longitude", point.longitude); put("notes", notes)
+            put("created_at", now); put("updated_at", now)
+        }
+        return writableDatabase.insertOrThrow("fishing_spots", null, values)
+    }
+
+    fun loadFishingSpot(id: Long): FishingSpot? {
+        readableDatabase.query("fishing_spots", null, "id=?", arrayOf(id.toString()), null, null, null).use { cursor ->
+            return if (cursor.moveToFirst()) cursor.toFishingSpot() else null
+        }
+    }
+
+    fun loadFishingSpots(): List<FishingSpot> {
+        val result = mutableListOf<FishingSpot>()
+        readableDatabase.query(
+            "fishing_spots", null, null, null, null, null,
+            "COALESCE(last_visited_at, updated_at) DESC, id DESC"
+        ).use { cursor -> while (cursor.moveToNext()) result += cursor.toFishingSpot() }
+        return result
+    }
+
+    fun updateFishingSpot(id: Long, name: String, notes: String) {
+        val values = ContentValues().apply {
+            put("name", name); put("notes", notes); put("updated_at", System.currentTimeMillis())
+        }
+        writableDatabase.update("fishing_spots", values, "id=?", arrayOf(id.toString()))
+    }
+
+    fun deleteFishingSpot(id: Long) {
+        writableDatabase.delete("fishing_spots", "id=?", arrayOf(id.toString()))
+    }
+
+    fun saveFishingSpotRoute(id: Long, routePayload: String) {
+        require(routePayload.length <= 2_000_000) { "Fishing route payload too large" }
+        val now = System.currentTimeMillis()
+        val values = ContentValues().apply {
+            put("route_payload", routePayload); put("last_visited_at", now); put("updated_at", now)
+        }
+        writableDatabase.update("fishing_spots", values, "id=?", arrayOf(id.toString()))
+    }
+
+    private fun Cursor.toFishingSpot(): FishingSpot {
+        val payloadIndex = index("route_payload")
+        val payload = if (isNull(payloadIndex)) null else getString(payloadIndex)
+        val visitedIndex = index("last_visited_at")
+        return FishingSpot(
+            id = getLong(index("id")),
+            name = text("name"),
+            position = GeoPoint(double("latitude"), double("longitude")),
+            notes = text("notes"),
+            createdAtEpochMillis = getLong(index("created_at")),
+            updatedAtEpochMillis = getLong(index("updated_at")),
+            lastVisitedAtEpochMillis = if (isNull(visitedIndex)) null else getLong(visitedIndex),
+            lastRoute = payload?.let { RoutePersistenceCodec.decode(it)?.route }
+        )
+    }
+
+    private fun Cursor.index(name: String) = getColumnIndexOrThrow(name)
+    private fun Cursor.text(name: String) = getString(index(name))
+    private fun Cursor.double(name: String) = getDouble(index(name))
+    private fun Cursor.int(name: String) = getInt(index(name))
 
     private inline fun SQLiteDatabase.transaction(block: SQLiteDatabase.() -> Unit) {
         beginTransaction()
@@ -158,7 +238,7 @@ class LocalAppDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NA
 
     companion object {
         private const val DATABASE_NAME = "cap6_user.sqlite"
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 3
         private const val MAX_POINTS = 100_000
     }
 }
