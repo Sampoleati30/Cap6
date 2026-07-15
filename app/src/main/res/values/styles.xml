@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.CAP6" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">false</item><item name="android:statusBarColor">#071B2A</item><item name="android:navigationBarColor">#071B2A</item>
+    </style>
+</resources>

@@ -1,0 +1,71 @@
+vityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOCATION); return }
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS); return
+        }
+        if (clear) trackStore.clear()
+        serviceAction(TrackLocationService.ACTION_START)
+    }
+    private fun serviceAction(action: String) { ContextCompat.startForegroundService(this, Intent(this, TrackLocationService::class.java).setAction(action)) }
+
+    private fun exportGpx() {
+        val points = trackStore.load(); if (points.isEmpty()) return dialog("GPX", "Aucune trace enregistrée.")
+        pendingGpx = GpxCodec.exportTrack("CAP 6 ${SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())}", points)
+        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "application/gpx+xml"; putExtra(Intent.EXTRA_TITLE, "cap6-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.gpx") }, REQ_EXPORT)
+    }
+
+    private fun editProfile() {
+        val p = boatStore.load(); val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), 0) }
+        fun field(label: String, value: String, numeric: Boolean = false): EditText = EditText(this).apply { hint = label; setText(value); if (numeric) inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL; layout.addView(this) }
+        val name = field("Nom du bateau", p.name); val registration = field("Immatriculation", p.registration); val call = field("Indicatif VHF", p.callSign); val mmsi = field("MMSI", p.mmsi)
+        val draft = field("Tirant d'eau (m)", p.draftMeters.toString(), true); val cruise = field("Vitesse de croisière (nd)", p.cruiseSpeedKnots.toString(), true); val persons = field("Personnes à bord", p.personsOnBoard.toString(), true); val permit = field("Permis", p.permitType)
+        AlertDialog.Builder(this).setTitle("PROFIL BATEAU").setView(layout).setPositiveButton("Enregistrer") { _, _ ->
+            boatStore.save(p.copy(name = name.text.toString(), registration = registration.text.toString(), callSign = call.text.toString(), mmsi = mmsi.text.toString(), draftMeters = number(draft.text.toString(), p.draftMeters), cruiseSpeedKnots = number(cruise.text.toString(), p.cruiseSpeedKnots), personsOnBoard = persons.text.toString().toIntOrNull()?.coerceAtLeast(1) ?: p.personsOnBoard, permitType = permit.text.toString()))
+        }.setNegativeButton("Annuler", null).show()
+    }
+
+    private fun showGuide() {
+        val cards = runCatching { GuideRepository(this).cards() }.getOrElse { return dialog("Guide", it.message ?: "Indisponible") }
+        AlertDialog.Builder(this).setTitle("CODE & BALISAGE").setItems(cards.map { it.title }.toTypedArray()) { _, i ->
+            val c = cards[i]; dialog(c.title, "Signification :\n${c.meaning}\n\nConduite à tenir :\n${c.action}\n\nCouleurs : ${c.colours}\nVoyant : ${c.topmark}\nFeu : ${c.light}")
+        }.show()
+    }
+
+    private fun showOfflineRegions() {
+        val regions = runCatching { OfflineRegionRepository(this).regions() }.getOrElse { return dialog("Cartes", it.message ?: "Indisponible") }
+        AlertDialog.Builder(this).setTitle("CARTES HORS LIGNE").setItems(regions.map { it.name }.toTypedArray()) { _, i ->
+            val r = regions[i]; dialog(r.name, "Zoom ${r.minZoom} à ${r.maxZoom}\nÉtat : ${r.status}\n\nLes couches locales essentielles sont embarquées. Le paquet cartographique détaillé doit être téléchargé séparément lorsqu'il sera publié.")
+        }.show()
+    }
+
+    private fun chooseMapMode() {
+        val modes = MapMode.entries
+        AlertDialog.Builder(this).setTitle("MODE DE CARTE").setSingleChoiceItems(modes.map { it.label }.toTypedArray(), mapMode.ordinal) { dialog, i -> mapMode = modes[i]; loadStyle(); dialog.dismiss() }.show()
+    }
+
+    private fun showStatus() {
+        val track = trackStore.summary(); val profile = boatStore.load(); val ports = marineData?.ports?.size ?: 0
+        dialog("CAP 6 — 1.0.0", "Méditerranée française : Cerbère → Monaco\nPorts locaux : $ports\nTrace : ${track.pointCount} points\nProfil : ${profile.name}\n\nFonctions : GPS, distance côte, repère 6 NM, ports, routage, suivi, trace GPX, profil bateau, pêche, balisage et VHF/SOS.\n\nLes données non officielles sont signalées comme indicatives.")
+    }
+
+    private fun updateDestinationLayer() { style?.getSourceAs<GeoJsonSource>("destination")?.setGeoJson(destination?.let(::pointCollection) ?: emptyCollection()) }
+    private fun updateRouteLayer() { style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(activeRoute?.points?.let(::lineCollection) ?: emptyCollection()) }
+    private fun updateTrackLayer() { style?.getSourceAs<GeoJsonSource>("track")?.setGeoJson(lineCollection(trackStore.load())) }
+
+    private fun pointCollection(point: GeoPoint): String {
+        val geometry = JSONObject().put("type", "Point").put("coordinates", JSONArray().put(point.longitude).put(point.latitude))
+        val feature = JSONObject().put("type", "Feature").put("properties", JSONObject()).put("geometry", geometry)
+        return JSONObject().put("type", "FeatureCollection").put("features", JSONArray().put(feature)).toString()
+    }
+    private fun lineCollection(points: List<GeoPoint>): String {
+        if (points.size < 2) return emptyCollection()
+        val coordinates = JSONArray(); points.forEach { coordinates.put(JSONArray().put(it.longitude).put(it.latitude)) }
+        val geometry = JSONObject().put("type", "LineString").put("coordinates", coordinates)
+        val feature = JSONObject().put("type", "Feature").put("properties", JSONObject()).put("geometry", geometry)
+        return JSONObject().put("type", "FeatureCollection").put("features", JSONArray().put(feature)).toString()
+    }
+    private fun emptyCollection() = "{\"type\":\"FeatureCollection\",\"features\":[]}"
+    private fun distanceLabel(meters: Double) = if (meters < 1000) "DISTANCE CÔTE\n${format(GeoCore.metersToNauticalMiles(meters), 2)} NM\n${format(meters, 0)} m" else "DISTANCE CÔTE\n${format(GeoCore.metersToNauticalMiles(meters), 2)} NM\n${format(meters / 1000, 2)} km"
+    private fun format(value: Double, decimals: Int) = String.format(Locale.FRANCE, "%.${decimals}f", value)
+    private fun number(value: String, fallback: Double) = value.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 } ?: fallback
+    private fun copy(text: String) { (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("CAP 6", text)); Toast.makeText(this, "Copié", Toast.LENGTH_SHORT).show() }
+    private fun share(text: String) { startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.

@@ -1,0 +1,154 @@
+package fr.cap6.app
+
+import android.Manifest
+import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Build
+import android.os.Bundle
+import android.view.Gravity
+import android.view.View
+import android.view.inputmethod.InputType
+import android.widget.*
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import org.json.JSONArray
+import org.json.JSONObject
+import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyFactory.*
+import org.maplibre.android.style.sources.GeoJsonSource
+import java.nio.charset.StandardCharsets
+import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.util.Date
+import java.util.Locale
+
+class MainActivity : AppCompatActivity(), LocationListener {
+    private lateinit var mapView: MapView
+    private lateinit var map: MapLibreMap
+    private lateinit var locationManager: LocationManager
+    private lateinit var distanceText: TextView
+    private lateinit var speedText: TextView
+    private lateinit var headingText: TextView
+    private lateinit var gpsText: TextView
+    private lateinit var routeBanner: TextView
+    private lateinit var orientationButton: Button
+    private lateinit var trackStore: TrackStore
+    private lateinit var routeStore: RouteStore
+    private lateinit var boatStore: BoatProfileStore
+
+    private var marineData: MarineDataBundle? = null
+    private var style: Style? = null
+    private var currentPoint: GeoPoint? = null
+    private var destination: GeoPoint? = null
+    private var destinationName = "Point carte"
+    private var activeRoute: PlannedRoute? = null
+    private var activeRouteName = ""
+    private var lastLocation: Location? = null
+    private var coastDistanceMeters: Double? = null
+    private val headingFilter = HeadingFilter()
+    private var mapMode = MapMode.DAY
+    private var orientationMode = OrientationMode.NORTH
+    private var following = true
+    private var pendingGpx: String? = null
+
+    enum class MapMode(val asset: String, val label: String) {
+        DAY("styles/cap6_day.json", "Jour"),
+        NIGHT("styles/cap6_night.json", "Nuit"),
+        CONTRAST("styles/cap6_contrast.json", "Contraste")
+    }
+    enum class OrientationMode(val label: String) { NORTH("N"), COURSE("CAP"), FREE("LIB") }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        MapLibre.getInstance(this)
+        locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        trackStore = TrackStore(this)
+        routeStore = RouteStore(this)
+        boatStore = BoatProfileStore(this)
+        routeStore.load()?.let {
+            activeRoute = it.route
+            activeRouteName = it.name
+            destination = it.route.points.lastOrNull()
+        }
+        setContentView(buildUi())
+        mapView.onCreate(savedInstanceState)
+        mapView.getMapAsync { ready ->
+            map = ready
+            map.addOnMoveListener(object : MapLibreMap.OnMoveListener {
+                override fun onMoveBegin(detector: org.maplibre.android.gestures.MoveGestureDetector) { following = false }
+                override fun onMove(detector: org.maplibre.android.gestures.MoveGestureDetector) = Unit
+                override fun onMoveEnd(detector: org.maplibre.android.gestures.MoveGestureDetector) = Unit
+            })
+            map.addOnMapLongClickListener { latLng ->
+                destination = GeoPoint(latLng.latitude, latLng.longitude)
+                destinationName = "Point carte"
+                updateDestinationLayer()
+                Toast.makeText(this, "Destination enregistrée — ouvrez Route", Toast.LENGTH_LONG).show()
+                true
+            }
+            loadStyle()
+        }
+        Thread {
+            runCatching { GeoJsonRepository(this).load() }
+                .onSuccess { data -> runOnUiThread { marineData = data; gpsText.text = "GPS\nDonnées prêtes"; requestGps() } }
+                .onFailure { error -> runOnUiThread { dialog("Données locales", error.message ?: "Chargement impossible") } }
+        }.start()
+        showSafetyWarning()
+    }
+
+    private fun buildUi(): View {
+        val root = FrameLayout(this)
+        mapView = MapView(this)
+        root.addView(mapView, FrameLayout.LayoutParams(-1, -1))
+
+        val dashboard = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(6), dp(8), dp(6), dp(8))
+            setBackgroundColor(Color.argb(238, 7, 27, 42))
+        }
+        distanceText = metric("DISTANCE CÔTE\n—", true)
+        speedText = metric("VITESSE\n— nd")
+        headingText = metric("CAP GPS\n—")
+        gpsText = metric("GPS\nInitialisation")
+        dashboard.addView(distanceText, LinearLayout.LayoutParams(0, -2, 1.45f))
+        listOf(speedText, headingText, gpsText).forEach { dashboard.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
+        root.addView(dashboard, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+
+        routeBanner = TextView(this).apply {
+            setTextColor(Color.WHITE); setBackgroundColor(Color.argb(240, 111, 47, 0)); textSize = 13f
+            setPadding(dp(12), dp(8), dp(12), dp(8)); visibility = View.GONE
+            setOnClickListener { showRouteDetails() }
+        }
+        root.addView(routeBanner, FrameLayout.LayoutParams(-1, -2, Gravity.TOP).apply { topMargin = dp(88) })
+
+        val controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+        controls.addView(Button(this).apply {
+            text = "⌖"; textSize = 22f; contentDescription = "Recentrer"
+            setOnClickListener { following = true; lastLocation?.let { centerOn(it, true) } ?: requestGps() }
+        }, LinearLayout.LayoutParams(dp(68), dp(62)))
+        orientationButton = Button(this).apply {
+            text = orientationMode.label; textSize = 12f
+            setOnClickListener { cycleOrientation() }
+        }
+        controls.addView(orientationButton, LinearLayout.LayoutParams(dp(68), dp(54)))
+        root.addView(controls, FrameLayout.LayoutParams(dp(76), -2, Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(8) })
+
+        val bottom = LinearLayout(this).apply { orientati

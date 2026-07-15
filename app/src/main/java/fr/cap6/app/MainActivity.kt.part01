@@ -1,0 +1,96 @@
+on = LinearLayout.HORIZONTAL; setBackgroundColor(Color.argb(248, 7, 27, 42)) }
+        bottom.addView(action("◎\nGPS") { requestGps() })
+        bottom.addView(action("◉\nPêche ici") { showFishing() })
+        bottom.addView(action("↗\nRoute") { showRouteMenu() })
+        bottom.addView(action("!\nVHF / SOS") { showVhf() })
+        bottom.addView(action("•••\nPlus") { showMore() })
+        root.addView(bottom, FrameLayout.LayoutParams(-1, dp(88), Gravity.BOTTOM))
+        return root
+    }
+
+    private fun metric(value: String, dominant: Boolean = false) = TextView(this).apply {
+        text = value; setTextColor(Color.WHITE); textSize = if (dominant) 15f else 13f
+        gravity = Gravity.CENTER; setPadding(dp(3), dp(3), dp(3), dp(3))
+    }
+    private fun action(label: String, handler: () -> Unit) = Button(this).apply {
+        text = label; setTextColor(Color.WHITE); textSize = 12f; setBackgroundColor(Color.TRANSPARENT)
+        setOnClickListener { handler() }; layoutParams = LinearLayout.LayoutParams(0, dp(88), 1f)
+    }
+    private fun readAsset(path: String) = assets.open(path).bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+
+    private fun loadStyle() {
+        map.setStyle(Style.Builder().fromUri("asset://${mapMode.asset}")) { loaded ->
+            style = loaded
+            loaded.addSource(GeoJsonSource("coast", readAsset("data/coast_legacy.geojson")))
+            loaded.addLayer(LineLayer("coast-line", "coast").withProperties(lineColor(if (mapMode == MapMode.NIGHT) "#D8F3FF" else "#153A4C"), lineWidth(2.5f)))
+            loaded.addSource(GeoJsonSource("sixnm", readAsset("data/limit_6nm_legacy.geojson")))
+            loaded.addLayer(LineLayer("sixnm-line", "sixnm").withProperties(lineColor("#FF334C"), lineWidth(2.2f), lineDasharray(arrayOf(2f, 2f))))
+            loaded.addSource(GeoJsonSource("track", emptyCollection()))
+            loaded.addLayer(LineLayer("track-line", "track").withProperties(lineColor("#8C52FF"), lineWidth(3.2f)))
+            loaded.addSource(GeoJsonSource("route", emptyCollection()))
+            loaded.addLayer(LineLayer("route-line", "route").withProperties(lineColor("#FF9F1C"), lineWidth(4.2f)))
+            loaded.addSource(GeoJsonSource("destination", emptyCollection()))
+            loaded.addLayer(CircleLayer("destination-circle", "destination").withProperties(circleRadius(8f), circleColor("#FF9F1C"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
+            loaded.addSource(GeoJsonSource("boat", emptyCollection()))
+            loaded.addLayer(CircleLayer("boat-circle", "boat").withProperties(circleRadius(10f), circleColor("#00D4FF"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
+            map.cameraPosition = CameraPosition.Builder().target(LatLng(43.25, 5.15)).zoom(6.1).build()
+            currentPoint?.let { loaded.getSourceAs<GeoJsonSource>("boat")?.setGeoJson(pointCollection(it)) }
+            updateDestinationLayer(); updateRouteLayer(); updateTrackLayer()
+        }
+    }
+
+    private fun requestGps() {
+        if (!hasLocation()) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), REQ_LOCATION)
+            return
+        }
+        if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            gpsText.text = "GPS\nDésactivé"; return
+        }
+        gpsText.text = "GPS\nRecherche"
+        runCatching {
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, this)
+            locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let(::onLocationChanged)
+        }.onFailure { gpsText.text = "GPS\nIndisponible" }
+    }
+    private fun hasLocation() = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    override fun onLocationChanged(location: Location) {
+        lastLocation = location
+        val point = GeoPoint(location.latitude, location.longitude)
+        currentPoint = point
+        coastDistanceMeters = marineData?.coastlineIndex?.nearestDistanceMeters(point)
+        distanceText.text = coastDistanceMeters?.let { distanceLabel(it) } ?: "DISTANCE CÔTE\nInconnue"
+        val knots = if (location.hasSpeed()) location.speed * 1.943844492 else 0.0
+        speedText.text = "VITESSE\n${format(knots, 1)} nd"
+        val filtered = headingFilter.update(if (location.hasBearing()) location.bearing.toDouble() else null, knots, System.currentTimeMillis())
+        headingText.text = if (knots < 1.0) "CAP GPS\n—\nImmobile" else "CAP GPS\n${filtered?.let { "%03.0f°".format(it) } ?: "—"}"
+        gpsText.text = when { location.accuracy <= 8 -> "GPS\nPrécis ±${location.accuracy.toInt()} m"; location.accuracy <= 25 -> "GPS\nMoyen ±${location.accuracy.toInt()} m"; else -> "GPS\nFaible ±${location.accuracy.toInt()} m" }
+        style?.getSourceAs<GeoJsonSource>("boat")?.setGeoJson(pointCollection(point))
+        if (following) centerOn(location, false)
+        updateNavigation(knots, location.accuracy.toDouble())
+        updateTrackLayer()
+    }
+
+    private fun centerOn(location: Location, animate: Boolean) {
+        if (!::map.isInitialized) return
+        val bearing = if (orientationMode == OrientationMode.COURSE && location.speed * 1.943844492 >= 1.2) location.bearing.toDouble() else if (orientationMode == OrientationMode.NORTH) 0.0 else map.cameraPosition.bearing
+        val camera = CameraPosition.Builder().target(LatLng(location.latitude, location.longitude)).zoom(maxOf(map.cameraPosition.zoom, 13.0)).bearing(bearing).build()
+        if (animate) map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 400) else map.cameraPosition = camera
+    }
+
+    private fun cycleOrientation() {
+        orientationMode = when (orientationMode) { OrientationMode.NORTH -> OrientationMode.COURSE; OrientationMode.COURSE -> OrientationMode.FREE; OrientationMode.FREE -> OrientationMode.NORTH }
+        orientationButton.text = orientationMode.label
+        if (orientationMode == OrientationMode.NORTH) map.animateCamera(CameraUpdateFactory.bearingTo(0.0), 300)
+    }
+
+    private fun showFishing() {
+        val point = currentPoint ?: return dialog("PÊCHE", "Position GPS indisponible.")
+        val result = marineData?.fishingEngine?.evaluate(point, LocalDate.now()) ?: return dialog("PÊCHE", "Base locale indisponible.")
+        val title = when (result.status) { FishingStatus.ALLOWED -> "PÊCHE AUTORISÉE"; FishingStatus.REGULATED -> "PÊCHE RÉGLEMENTÉE"; FishingStatus.FORBIDDEN -> "PÊCHE INTERDITE"; else -> "INFORMATION INSUFFISANTE" }
+        val rules = result.matchingRules.joinToString("\n\n") { "${it.name}\n${it.ruleText}\nSource : ${it.sourceName}${it.legalReference?.let { r -> "\nRéférence : $r" } ?: ""}" }
+        dialog(title, result.message + (if (rules.isBlank()) "" else "\n\n$rules") + "\n\nVérifiez l'arrêté en vigueur avant de pêcher.")
+    }
+
+    private fun showRouteMenu(
