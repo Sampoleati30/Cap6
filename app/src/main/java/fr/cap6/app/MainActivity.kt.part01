@@ -39,6 +39,7 @@ on = LinearLayout.HORIZONTAL; setBackgroundColor(Color.argb(248, 7, 27, 42)) }
         }
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     private fun requestGps() {
         if (!hasLocation()) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), REQ_LOCATION)
