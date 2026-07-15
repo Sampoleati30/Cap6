@@ -30,7 +30,7 @@ jobs:
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -50,6 +50,14 @@ jobs:
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
+      - name: Upload Gradle diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CAP6-gradle-diagnostic
+          path: gradle-build.log
+          if-no-files-found: ignore
+
       - name: Publish concise Gradle failure
         if: steps.gradle_build.outputs.exit_code != '0'
         env:
@@ -58,13 +66,13 @@ jobs:
           {
             echo "## Dernière erreur de compilation CAP 6"
             echo
-            echo "Le correctif AndroidX 1.16.0 est appliqué. Cette erreur correspond au build actuel."
+            echo "Le projet utilise désormais Android API 36 et AndroidX Core 1.17.0. Cette erreur correspond au build actuel."
             echo
             echo '```text'
             grep -E "(^e: |error:|FAILURE:|What went wrong|Execution failed|Caused by:|Unresolved reference|Type mismatch|Could not|requires libraries|requires applications|A failure occurred|Compilation error)" gradle-build.log | tail -n 120 || true
             echo
             echo "--- FIN DU JOURNAL ---"
-            tail -n 45 gradle-build.log
+            tail -n 55 gradle-build.log
             echo '```'
           } > gradle-failure.md
           gh issue edit 7 --body-file gradle-failure.md
