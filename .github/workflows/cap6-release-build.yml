@@ -3,10 +3,13 @@ name: CAP 6 1.0.0 release build
 on:
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '51 15 * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   release-apk:
@@ -47,3 +50,22 @@ jobs:
             CAP6-1.0.0.apk
             CAP6-1.0.0.apk.sha256
           if-no-files-found: error
+      - name: Publish CAP 6 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view cap6-1.0.0 >/dev/null 2>&1; then
+            gh release upload cap6-1.0.0 CAP6-1.0.0.apk CAP6-1.0.0.apk.sha256 --clobber
+          else
+            gh release create cap6-1.0.0 CAP6-1.0.0.apk CAP6-1.0.0.apk.sha256 --target main --title "CAP 6 1.0.0" --notes "Version fonctionnelle complète Android. Les données nautiques non officielles ou incomplètes sont signalées dans l’application."
+          fi
+      - name: Report success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 7 --body "✅ Le workflow dédié a compilé, testé et publié CAP6-1.0.0.apk dans les Releases."
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 7 --body "❌ Le workflow dédié CAP 6 1.0.0 a échoué. Le journal Actions indique l’étape exacte à corriger."
