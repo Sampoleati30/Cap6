@@ -15,7 +15,7 @@ val hasReleaseSigning = listOf(releaseStorePath, releaseStorePassword, releaseKe
 
 android {
     namespace = "fr.cap6.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "fr.cap6.app"
@@ -68,7 +68,7 @@ kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
-    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("org.maplibre.gl:android-sdk:13.0.2")
     testImplementation("junit:junit:4.13.2")
 }
