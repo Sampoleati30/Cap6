@@ -1,47 +1,56 @@
 name: CAP 6 1.0.0 release build
 
 on:
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: '12 16 * * *'
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: write
-  issues: write
 
 jobs:
   release-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Checkout complete application from main
+      - name: Checkout complete application
         uses: actions/checkout@v4
-        with:
-          ref: main
-      - uses: actions/setup-java@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Install Android SDK
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses >/dev/null
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+
       - name: Reconstruct complete sources
         run: bash scripts/reconstruct_sources.sh
+
       - name: Unit tests, lint and complete APK
         run: gradle --stacktrace testDebugUnitTest lintDebug assembleDebug
-      - name: Verify signature
-        run: "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Verify APK signature
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+
       - name: Prepare release assets
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk CAP6-1.0.0.apk
           sha256sum CAP6-1.0.0.apk > CAP6-1.0.0.apk.sha256
+
       - name: Upload installable application
         uses: actions/upload-artifact@v4
         with:
@@ -50,6 +59,7 @@ jobs:
             CAP6-1.0.0.apk
             CAP6-1.0.0.apk.sha256
           if-no-files-found: error
+
       - name: Publish CAP 6 release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,15 +67,8 @@ jobs:
           if gh release view cap6-1.0.0 >/dev/null 2>&1; then
             gh release upload cap6-1.0.0 CAP6-1.0.0.apk CAP6-1.0.0.apk.sha256 --clobber
           else
-            gh release create cap6-1.0.0 CAP6-1.0.0.apk CAP6-1.0.0.apk.sha256 --target main --title "CAP 6 1.0.0" --notes "Version fonctionnelle complète Android. Les données nautiques non officielles ou incomplètes sont signalées dans l’application."
+            gh release create cap6-1.0.0 CAP6-1.0.0.apk CAP6-1.0.0.apk.sha256 \
+              --target main \
+              --title "CAP 6 1.0.0" \
+              --notes "Version Android complète. Les données nautiques non officielles ou incomplètes sont signalées dans l'application."
           fi
-      - name: Report success
-        if: success()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue comment 7 --body "✅ Le workflow dédié a compilé, testé et publié CAP6-1.0.0.apk dans les Releases."
-      - name: Report failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue comment 7 --body "❌ Le workflow dédié CAP 6 1.0.0 a échoué. Le journal Actions indique l’étape exacte à corriger."
