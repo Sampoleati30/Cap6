@@ -1,68 +1,308 @@
 vityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOCATION); return }
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS); return
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS)
+            return
         }
         if (clear) trackStore.clear()
         serviceAction(TrackLocationService.ACTION_START)
     }
-    private fun serviceAction(action: String) { ContextCompat.startForegroundService(this, Intent(this, TrackLocationService::class.java).setAction(action)) }
+
+    private fun serviceAction(action: String) {
+        ContextCompat.startForegroundService(this, Intent(this, TrackLocationService::class.java).setAction(action))
+    }
 
     private fun exportGpx() {
-        val points = trackStore.load(); if (points.isEmpty()) return dialog("GPX", "Aucune trace enregistrée.")
+        val points = trackStore.load()
+        if (points.isEmpty()) return dialog("GPX", "Aucune trace enregistrée.")
         pendingGpx = GpxCodec.exportTrack("CAP 6 ${SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())}", points)
-        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "application/gpx+xml"; putExtra(Intent.EXTRA_TITLE, "cap6-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.gpx") }, REQ_EXPORT)
+        startActivityForResult(
+            Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/gpx+xml"
+                putExtra(Intent.EXTRA_TITLE, "cap6-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.gpx")
+            },
+            REQ_EXPORT
+        )
     }
 
     private fun editProfile() {
-        val p = boatStore.load(); val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), 0) }
-        fun field(label: String, value: String, numeric: Boolean = false): EditText = EditText(this).apply { hint = label; setText(value); if (numeric) inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL; layout.addView(this) }
-        val name = field("Nom du bateau", p.name); val registration = field("Immatriculation", p.registration); val call = field("Indicatif VHF", p.callSign); val mmsi = field("MMSI", p.mmsi)
-        val draft = field("Tirant d'eau (m)", p.draftMeters.toString(), true); val cruise = field("Vitesse de croisière (nd)", p.cruiseSpeedKnots.toString(), true); val persons = field("Personnes à bord", p.personsOnBoard.toString(), true); val permit = field("Permis", p.permitType)
-        AlertDialog.Builder(this).setTitle("PROFIL BATEAU").setView(layout).setPositiveButton("Enregistrer") { _, _ ->
-            boatStore.save(p.copy(name = name.text.toString(), registration = registration.text.toString(), callSign = call.text.toString(), mmsi = mmsi.text.toString(), draftMeters = number(draft.text.toString(), p.draftMeters), cruiseSpeedKnots = number(cruise.text.toString(), p.cruiseSpeedKnots), personsOnBoard = persons.text.toString().toIntOrNull()?.coerceAtLeast(1) ?: p.personsOnBoard, permitType = permit.text.toString()))
-        }.setNegativeButton("Annuler", null).show()
+        val p = boatStore.load()
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), 0) }
+        fun field(label: String, value: String, numeric: Boolean = false): EditText = EditText(this).apply {
+            hint = label
+            setText(value)
+            if (numeric) inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            layout.addView(this)
+        }
+        val name = field("Nom du bateau", p.name)
+        val registration = field("Immatriculation", p.registration)
+        val call = field("Indicatif VHF", p.callSign)
+        val mmsi = field("MMSI", p.mmsi)
+        val draft = field("Tirant d'eau (m)", p.draftMeters.toString(), true)
+        val cruise = field("Vitesse de croisière (nd)", p.cruiseSpeedKnots.toString(), true)
+        val persons = field("Personnes à bord", p.personsOnBoard.toString(), true)
+        val permit = field("Permis", p.permitType)
+        AlertDialog.Builder(this)
+            .setTitle("PROFIL BATEAU")
+            .setView(layout)
+            .setPositiveButton("Enregistrer") { _, _ ->
+                boatStore.save(
+                    p.copy(
+                        name = name.text.toString(),
+                        registration = registration.text.toString(),
+                        callSign = call.text.toString(),
+                        mmsi = mmsi.text.toString(),
+                        draftMeters = number(draft.text.toString(), p.draftMeters),
+                        cruiseSpeedKnots = number(cruise.text.toString(), p.cruiseSpeedKnots),
+                        personsOnBoard = persons.text.toString().toIntOrNull()?.coerceAtLeast(1) ?: p.personsOnBoard,
+                        permitType = permit.text.toString()
+                    )
+                )
+            }
+            .setNegativeButton("Annuler", null)
+            .show()
+    }
+
+    private fun saveFishingSpotDialog(point: GeoPoint) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), 0)
+        }
+        val name = EditText(this).apply {
+            hint = "Nom du spot"
+            setText("Spot ${SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE).format(Date())}")
+            selectAll()
+            layout.addView(this)
+        }
+        val notes = EditText(this).apply {
+            hint = "Notes : espèce, montage, météo, profondeur…"
+            minLines = 3
+            gravity = Gravity.TOP
+            layout.addView(this)
+        }
+        val coordinates = TextView(this).apply {
+            text = CoordinateFormatter.degreesMinutes(point)
+            setTextColor(Color.DKGRAY)
+            setPadding(0, dp(10), 0, 0)
+            layout.addView(this)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("ENREGISTRER UN SPOT PÊCHE")
+            .setView(layout)
+            .setPositiveButton("Enregistrer") { _, _ ->
+                val spot = fishingSpotStore.add(name.text.toString(), point, notes.text.toString())
+                destination = spot.position
+                destinationName = spot.name
+                destinationSpotId = spot.id
+                updateDestinationLayer()
+                updateFishingSpotsLayer()
+                centerOn(spot.position)
+                Toast.makeText(this, "Spot enregistré : ${spot.name}", Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton("Annuler", null)
+            .show()
+    }
+
+    private fun showFishingSpots() {
+        val spots = fishingSpotStore.all()
+        if (spots.isEmpty()) return dialog("MES SPOTS", "Aucun spot enregistré. Activez le mode pêche puis faites un appui long sur la carte.")
+        val labels = spots.map { spot ->
+            val distance = currentPoint?.let { GeoCore.metersToNauticalMiles(GeoCore.haversineMeters(it, spot.position)) }
+            if (distance == null) spot.name else "${spot.name}  ·  ${format(distance, 2)} NM"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("MES SPOTS PÊCHE — ${spots.size}")
+            .setItems(labels.toTypedArray()) { _, index -> showFishingSpotActions(spots[index]) }
+            .setNegativeButton("Fermer", null)
+            .show()
+    }
+
+    private fun showFishingSpotActions(spot: FishingSpot) {
+        val routeInfo = spot.lastRoute?.let { "\nDernière route : ${format(it.distanceNm, 2)} NM" } ?: "\nAucune route enregistrée"
+        val details = buildString {
+            append(CoordinateFormatter.degreesMinutes(spot.position))
+            append("\n")
+            append(CoordinateFormatter.decimal(spot.position))
+            if (spot.notes.isNotBlank()) append("\n\n").append(spot.notes)
+            append(routeInfo)
+        }
+        val actions = arrayOf("Naviguer vers ce spot", "Afficher sur la carte", "Modifier", "Supprimer")
+        AlertDialog.Builder(this)
+            .setTitle(spot.name)
+            .setMessage(details)
+            .setItems(actions) { _, index ->
+                when (index) {
+                    0 -> {
+                        destination = spot.position
+                        destinationName = spot.name
+                        destinationSpotId = spot.id
+                        updateDestinationLayer()
+                        calculateRoute(spot.position, spot.name, spot.id)
+                    }
+                    1 -> {
+                        destination = spot.position
+                        destinationName = spot.name
+                        destinationSpotId = spot.id
+                        updateDestinationLayer()
+                        centerOn(spot.position)
+                    }
+                    2 -> editFishingSpotDialog(spot)
+                    3 -> AlertDialog.Builder(this)
+                        .setTitle("Supprimer ${spot.name} ?")
+                        .setMessage("Le spot et sa dernière route seront supprimés du téléphone.")
+                        .setPositiveButton("Supprimer") { _, _ ->
+                            fishingSpotStore.delete(spot.id)
+                            if (destinationSpotId == spot.id) destinationSpotId = null
+                            updateFishingSpotsLayer()
+                        }
+                        .setNegativeButton("Annuler", null)
+                        .show()
+                }
+            }
+            .setNegativeButton("Fermer", null)
+            .show()
+    }
+
+    private fun editFishingSpotDialog(spot: FishingSpot) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), 0, dp(20), 0)
+        }
+        val name = EditText(this).apply { hint = "Nom"; setText(spot.name); layout.addView(this) }
+        val notes = EditText(this).apply { hint = "Notes"; setText(spot.notes); minLines = 3; gravity = Gravity.TOP; layout.addView(this) }
+        AlertDialog.Builder(this)
+            .setTitle("MODIFIER LE SPOT")
+            .setView(layout)
+            .setPositiveButton("Enregistrer") { _, _ ->
+                fishingSpotStore.rename(spot.id, name.text.toString(), notes.text.toString())
+                updateFishingSpotsLayer()
+            }
+            .setNegativeButton("Annuler", null)
+            .show()
+    }
+
+    private fun showRecentFishingRoutes() {
+        val spots = fishingSpotStore.recentRoutes()
+        if (spots.isEmpty()) return dialog("DERNIÈRES ROUTES PÊCHE", "Aucune route de pêche enregistrée pour le moment.")
+        val labels = spots.map { spot -> "${spot.name}  ·  ${format(requireNotNull(spot.lastRoute).distanceNm, 2)} NM" }
+        AlertDialog.Builder(this)
+            .setTitle("DERNIÈRES ROUTES PÊCHE")
+            .setItems(labels.toTypedArray()) { _, index ->
+                val spot = spots[index]
+                val oldRoute = requireNotNull(spot.lastRoute)
+                AlertDialog.Builder(this)
+                    .setTitle(spot.name)
+                    .setItems(arrayOf("Recalculer depuis ma position", "Afficher l'ancienne route")) { _, choice ->
+                        if (choice == 0) {
+                            destination = spot.position
+                            destinationName = spot.name
+                            destinationSpotId = spot.id
+                            updateDestinationLayer()
+                            calculateRoute(spot.position, spot.name, spot.id)
+                        } else {
+                            activeRoute = oldRoute
+                            activeRouteName = "Historique — ${spot.name}"
+                            routeStore.save(activeRouteName, oldRoute)
+                            destination = spot.position
+                            destinationName = spot.name
+                            destinationSpotId = spot.id
+                            updateDestinationLayer()
+                            updateRouteLayer()
+                            routeBanner.visibility = View.VISIBLE
+                            routeBanner.text = "ANCIENNE ROUTE — ${spot.name}\n${format(oldRoute.distanceNm, 2)} NM · recalcul conseillé depuis la position actuelle"
+                            centerOn(spot.position, 13.5)
+                        }
+                    }
+                    .show()
+            }
+            .setNegativeButton("Fermer", null)
+            .show()
     }
 
     private fun showGuide() {
         val cards = runCatching { GuideRepository(this).cards() }.getOrElse { return dialog("Guide", it.message ?: "Indisponible") }
         AlertDialog.Builder(this).setTitle("CODE & BALISAGE").setItems(cards.map { it.title }.toTypedArray()) { _, i ->
-            val c = cards[i]; dialog(c.title, "Signification :\n${c.meaning}\n\nConduite à tenir :\n${c.action}\n\nCouleurs : ${c.colours}\nVoyant : ${c.topmark}\nFeu : ${c.light}")
+            val c = cards[i]
+            dialog(c.title, "Signification :\n${c.meaning}\n\nConduite à tenir :\n${c.action}\n\nCouleurs : ${c.colours}\nVoyant : ${c.topmark}\nFeu : ${c.light}")
         }.show()
     }
 
     private fun showOfflineRegions() {
         val regions = runCatching { OfflineRegionRepository(this).regions() }.getOrElse { return dialog("Cartes", it.message ?: "Indisponible") }
         AlertDialog.Builder(this).setTitle("CARTES HORS LIGNE").setItems(regions.map { it.name }.toTypedArray()) { _, i ->
-            val r = regions[i]; dialog(r.name, "Zoom ${r.minZoom} à ${r.maxZoom}\nÉtat : ${r.status}\n\nLes couches locales essentielles sont embarquées. Le paquet cartographique détaillé doit être téléchargé séparément lorsqu'il sera publié.")
+            val r = regions[i]
+            dialog(r.name, "Zoom ${r.minZoom} à ${r.maxZoom}\nÉtat : ${r.status}\n\nLes couches locales essentielles sont embarquées. Le paquet cartographique détaillé doit être téléchargé séparément lorsqu'il sera publié.")
         }.show()
     }
 
     private fun chooseMapMode() {
         val modes = MapMode.entries
-        AlertDialog.Builder(this).setTitle("MODE DE CARTE").setSingleChoiceItems(modes.map { it.label }.toTypedArray(), mapMode.ordinal) { dialog, i -> mapMode = modes[i]; loadStyle(); dialog.dismiss() }.show()
+        AlertDialog.Builder(this).setTitle("MODE DE CARTE").setSingleChoiceItems(modes.map { it.label }.toTypedArray(), mapMode.ordinal) { dialog, i ->
+            mapMode = modes[i]
+            loadStyle()
+            dialog.dismiss()
+        }.show()
     }
 
     private fun showStatus() {
-        val track = trackStore.summary(); val profile = boatStore.load(); val ports = marineData?.ports?.size ?: 0
-        dialog("CAP 6 — 1.0.0", "Méditerranée française : Cerbère → Monaco\nPorts locaux : $ports\nTrace : ${track.pointCount} points\nProfil : ${profile.name}\n\nFonctions : GPS, distance côte, repère 6 NM, ports, routage, suivi, trace GPX, profil bateau, pêche, balisage et VHF/SOS.\n\nLes données non officielles sont signalées comme indicatives.")
+        val track = trackStore.summary()
+        val profile = boatStore.load()
+        val ports = marineData?.ports?.size ?: 0
+        val spots = fishingSpotStore.all().size
+        dialog(
+            "CAP 6 — 1.0.0",
+            "Méditerranée française : Cerbère → Monaco\n" +
+                "Ports locaux : $ports\n" +
+                "Spots pêche : $spots\n" +
+                "Mode pêche : ${if (fishingMode) "ACTIF" else "inactif"}\n" +
+                "Trace : ${track.pointCount} points\n" +
+                "Profil : ${profile.name}\n\n" +
+                "Fonctions : GPS, distance côte, repère 6 NM, ports, routage, suivi, trace GPX, spots et routes pêche, profil bateau, balisage et VHF/SOS.\n\n" +
+                "Les données non officielles sont signalées comme indicatives."
+        )
     }
 
-    private fun updateDestinationLayer() { style?.getSourceAs<GeoJsonSource>("destination")?.setGeoJson(destination?.let(::pointCollection) ?: emptyCollection()) }
-    private fun updateRouteLayer() { style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(activeRoute?.points?.let(::lineCollection) ?: emptyCollection()) }
-    private fun updateTrackLayer() { style?.getSourceAs<GeoJsonSource>("track")?.setGeoJson(lineCollection(trackStore.load().map { it.position })) }
+    private fun updateDestinationLayer() {
+        style?.getSourceAs<GeoJsonSource>("destination")?.setGeoJson(destination?.let(::pointCollection) ?: emptyCollection())
+    }
+
+    private fun updateRouteLayer() {
+        style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(activeRoute?.points?.let(::lineCollection) ?: emptyCollection())
+    }
+
+    private fun updateTrackLayer() {
+        style?.getSourceAs<GeoJsonSource>("track")?.setGeoJson(lineCollection(trackStore.load().map { it.position }))
+    }
+
+    private fun updateFishingSpotsLayer() {
+        style?.getSourceAs<GeoJsonSource>("fishing-spots")?.setGeoJson(fishingSpotsCollection(fishingSpotStore.all()))
+    }
 
     private fun pointCollection(point: GeoPoint): String {
         val geometry = JSONObject().put("type", "Point").put("coordinates", JSONArray().put(point.longitude).put(point.latitude))
         val feature = JSONObject().put("type", "Feature").put("properties", JSONObject()).put("geometry", geometry)
         return JSONObject().put("type", "FeatureCollection").put("features", JSONArray().put(feature)).toString()
     }
+
+    private fun fishingSpotsCollection(spots: List<FishingSpot>): String {
+        val features = JSONArray()
+        spots.forEach { spot ->
+            val geometry = JSONObject().put("type", "Point").put("coordinates", JSONArray().put(spot.position.longitude).put(spot.position.latitude))
+            val properties = JSONObject().put("id", spot.id).put("name", spot.name).put("hasRoute", spot.lastRoute != null)
+            features.put(JSONObject().put("type", "Feature").put("properties", properties).put("geometry", geometry))
+        }
+        return JSONObject().put("type", "FeatureCollection").put("features", features).toString()
+    }
+
     private fun lineCollection(points: List<GeoPoint>): String {
         if (points.size < 2) return emptyCollection()
-        val coordinates = JSONArray(); points.forEach { coordinates.put(JSONArray().put(it.longitude).put(it.latitude)) }
+        val coordinates = JSONArray()
+        points.forEach { coordinates.put(JSONArray().put(it.longitude).put(it.latitude)) }
         val geometry = JSONObject().put("type", "LineString").put("coordinates", coordinates)
         val feature = JSONObject().put("type", "Feature").put("properties", JSONObject()).put("geometry", geometry)
         return JSONObject().put("type", "FeatureCollection").put("features", JSONArray().put(feature)).toString()
     }
+
     private fun emptyCollection() = "{\"type\":\"FeatureCollection\",\"features\":[]}"
     private fun distanceLabel(meters: Double) = if (meters < 1000) "DISTANCE CÔTE\n${format(GeoCore.metersToNauticalMiles(meters), 2)} NM\n${format(meters, 0)} m" else "DISTANCE CÔTE\n${format(GeoCore.metersToNauticalMiles(meters), 2)} NM\n${format(meters / 1000, 2)} km"
     private fun format(value: Double, decimals: Int) = String.format(Locale.FRANCE, "%.${decimals}f", value)
