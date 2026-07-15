@@ -1,24 +1,17 @@
-name: CAP 6 1.0.0 release build
+name: CAP 6 manual Android build
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
-  contents: write
-  issues: write
+  contents: read
 
 jobs:
-  release-apk:
+  build-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Checkout complete application
+      - name: Checkout application
         uses: actions/checkout@v4
 
       - name: Set up Java 17
@@ -40,75 +33,26 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Reconstruct complete sources
+      - name: Reconstruct sources
         run: bash scripts/reconstruct_sources.sh
 
-      - name: Unit tests, lint and complete APK
-        id: gradle_build
-        shell: bash
-        run: |
-          set +e
-          gradle --stacktrace testDebugUnitTest lintDebug assembleDebug 2>&1 | tee gradle-build.log
-          status=${PIPESTATUS[0]}
-          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Upload Gradle diagnostic log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: CAP6-gradle-diagnostic
-          path: gradle-build.log
-          if-no-files-found: ignore
-
-      - name: Publish concise Gradle failure
-        if: steps.gradle_build.outputs.exit_code != '0'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          {
-            echo "## Dernière erreur de compilation CAP 6"
-            echo
-            echo "Le projet utilise désormais Android API 36 et AndroidX Core 1.17.0. Cette erreur correspond au build actuel."
-            echo
-            echo '```text'
-            grep -E "(^e: |error:|FAILURE:|What went wrong|Execution failed|Caused by:|Unresolved reference|Type mismatch|Could not|requires libraries|requires applications|A failure occurred|Compilation error)" gradle-build.log | tail -n 120 || true
-            echo
-            echo "--- FIN DU JOURNAL ---"
-            tail -n 55 gradle-build.log
-            echo '```'
-          } > gradle-failure.md
-          gh issue edit 7 --body-file gradle-failure.md
-          exit 1
+      - name: Build APK
+        run: gradle --stacktrace testDebugUnitTest lintDebug assembleDebug
 
       - name: Verify APK signature
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Prepare release assets
+      - name: Prepare APK
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk CAP6-1.0.0.apk
           sha256sum CAP6-1.0.0.apk > CAP6-1.0.0.apk.sha256
 
-      - name: Upload installable application
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CAP6-1.0.0-complete
+          name: CAP6-1.0.0
           path: |
             CAP6-1.0.0.apk
             CAP6-1.0.0.apk.sha256
           if-no-files-found: error
-
-      - name: Publish CAP 6 release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view cap6-1.0.0 >/dev/null 2>&1; then
-            gh release upload cap6-1.0.0 CAP6-1.0.0.apk CAP6-1.0.0.apk.sha256 --clobber
-          else
-            gh release create cap6-1.0.0 CAP6-1.0.0.apk CAP6-1.0.0.apk.sha256 \
-              --target main \
-              --title "CAP 6 1.0.0" \
-              --notes "Version Android complète. Les données nautiques non officielles ou incomplètes sont signalées dans l'application."
-          fi
