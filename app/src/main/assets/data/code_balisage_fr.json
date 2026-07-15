@@ -1,0 +1,15 @@
+{
+  "language": "fr",
+  "version": "2026.07-alpha1",
+  "source": "User-provided CAP 6 specification; regulatory review required",
+  "cards": [
+    {"id":"cardinale_nord","title":"CARDINALE NORD","meaning":"Le danger se situe au sud de la marque.","action":"Passez au nord de la bouée.","colours":"Noir au-dessus, jaune en dessous.","topmark":"Deux cônes noirs pointés vers le haut.","light":"Feu blanc scintillant continu ou rapide.","verification_status":"pedagogical_content_to_review"},
+    {"id":"cardinale_est","title":"CARDINALE EST","meaning":"Le danger se situe à l’ouest de la marque.","action":"Passez à l’est de la bouée.","colours":"Noir, jaune, noir.","topmark":"Deux cônes opposés par leur base.","light":"Feu blanc par groupes de 3.","verification_status":"pedagogical_content_to_review"},
+    {"id":"cardinale_sud","title":"CARDINALE SUD","meaning":"Le danger se situe au nord de la marque.","action":"Passez au sud de la bouée.","colours":"Jaune au-dessus, noir en dessous.","topmark":"Deux cônes pointés vers le bas.","light":"Feu blanc par groupes de 6 suivi d’un éclat long.","verification_status":"pedagogical_content_to_review"},
+    {"id":"cardinale_ouest","title":"CARDINALE OUEST","meaning":"Le danger se situe à l’est de la marque.","action":"Passez à l’ouest de la bouée.","colours":"Jaune, noir, jaune.","topmark":"Deux cônes opposés par leur pointe.","light":"Feu blanc par groupes de 9.","verification_status":"pedagogical_content_to_review"},
+    {"id":"danger_isole","title":"DANGER ISOLÉ","meaning":"Danger localisé autour de la marque.","action":"Passez à distance.","colours":"Noir et rouge.","topmark":"Deux boules noires.","light":"Feu blanc par groupes de 2.","verification_status":"pedagogical_content_to_review"},
+    {"id":"eaux_saines","title":"EAUX SAINES","meaning":"Eau navigable autour de la marque.","action":"Peut signaler un atterrissage ou l’axe d’un chenal.","colours":"Rouge et blanc.","topmark":"Une boule rouge.","light":"Rythme à vérifier sur la carte et le livre des feux.","verification_status":"pedagogical_content_to_review"},
+    {"id":"marque_speciale","title":"MARQUE SPÉCIALE","meaning":"Zone ou dispositif particulier.","action":"Consultez la carte pour connaître sa fonction.","colours":"Jaune.","topmark":"Croix de Saint-André.","light":"Feu jaune, rythme selon la fonction.","verification_status":"pedagogical_content_to_review"}
+  ],
+  "latéral_region_a":{"entering_from_sea":"Rouge à bâbord (gauche), vert à tribord (droite).","leaving_port":"Rouge à droite, vert à gauche.","verification_status":"pedagogical_content_to_review"}
+}

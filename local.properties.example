@@ -1,0 +1,2 @@
+# Ne commitez pas local.properties. Adaptez le chemin à votre ordinateur.
+sdk.dir=/chemin/vers/Android/Sdk
