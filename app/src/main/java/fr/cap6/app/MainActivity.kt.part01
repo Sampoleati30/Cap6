@@ -1,21 +1,32 @@
-on = LinearLayout.HORIZONTAL; setBackgroundColor(Color.argb(248, 7, 27, 42)) }
-        bottom.addView(action("◎\nGPS") { requestGps() })
-        bottom.addView(action("◉\nPêche ici") { showFishing() })
-        bottom.addView(action("↗\nRoute") { showRouteMenu() })
-        bottom.addView(action("!\nVHF / SOS") { showVhf() })
-        bottom.addView(action("•••\nPlus") { showMore() })
-        root.addView(bottom, FrameLayout.LayoutParams(-1, dp(88), Gravity.BOTTOM))
+on = LinearLayout.HORIZONTAL; setBackgroundColor(Color.argb(252, 4, 25, 40)); elevation = dp(8).toFloat() }
+        bottom.addView(action("GPS") { requestGps() })
+        bottom.addView(action("PÊCHE") { showFishingModeMenu() })
+        bottom.addView(action("ROUTE") { showRouteMenu() })
+        bottom.addView(action("SOS") { showVhf() })
+        bottom.addView(action("MENU") { showMore() })
+        root.addView(bottom, FrameLayout.LayoutParams(-1, dp(82), Gravity.BOTTOM))
         return root
     }
 
     private fun metric(value: String, dominant: Boolean = false) = TextView(this).apply {
-        text = value; setTextColor(Color.WHITE); textSize = if (dominant) 15f else 13f
-        gravity = Gravity.CENTER; setPadding(dp(3), dp(3), dp(3), dp(3))
+        text = value
+        setTextColor(Color.WHITE)
+        textSize = if (dominant) 15f else 13f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        setPadding(dp(3), dp(3), dp(3), dp(3))
     }
+
     private fun action(label: String, handler: () -> Unit) = Button(this).apply {
-        text = label; setTextColor(Color.WHITE); textSize = 12f; setBackgroundColor(Color.TRANSPARENT)
-        setOnClickListener { handler() }; layoutParams = LinearLayout.LayoutParams(0, dp(88), 1f)
+        text = label
+        setTextColor(Color.WHITE)
+        textSize = 12f
+        typeface = Typeface.DEFAULT_BOLD
+        setBackgroundColor(Color.TRANSPARENT)
+        setOnClickListener { handler() }
+        layoutParams = LinearLayout.LayoutParams(0, dp(82), 1f)
     }
+
     private fun readAsset(path: String) = assets.open(path).bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
 
     private fun loadStyle() {
@@ -26,16 +37,23 @@ on = LinearLayout.HORIZONTAL; setBackgroundColor(Color.argb(248, 7, 27, 42)) }
             loaded.addSource(GeoJsonSource("sixnm", readAsset("data/limit_6nm_legacy.geojson")))
             loaded.addLayer(LineLayer("sixnm-line", "sixnm").withProperties(lineColor("#FF334C"), lineWidth(2.2f), lineDasharray(arrayOf(2f, 2f))))
             loaded.addSource(GeoJsonSource("track", emptyCollection()))
-            loaded.addLayer(LineLayer("track-line", "track").withProperties(lineColor("#8C52FF"), lineWidth(3.2f)))
+            loaded.addLayer(LineLayer("track-line", "track").withProperties(lineColor("#9B7BFF"), lineWidth(3.2f)))
             loaded.addSource(GeoJsonSource("route", emptyCollection()))
-            loaded.addLayer(LineLayer("route-line", "route").withProperties(lineColor("#FF9F1C"), lineWidth(4.2f)))
+            loaded.addLayer(LineLayer("route-line", "route").withProperties(lineColor("#FFB000"), lineWidth(4.2f)))
+            loaded.addSource(GeoJsonSource("fishing-spots", emptyCollection()))
+            loaded.addLayer(CircleLayer("fishing-spots-circle", "fishing-spots").withProperties(
+                circleRadius(8f), circleColor("#36E27A"), circleStrokeColor("#041D2B"), circleStrokeWidth(3f)
+            ))
             loaded.addSource(GeoJsonSource("destination", emptyCollection()))
-            loaded.addLayer(CircleLayer("destination-circle", "destination").withProperties(circleRadius(8f), circleColor("#FF9F1C"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
+            loaded.addLayer(CircleLayer("destination-circle", "destination").withProperties(circleRadius(8f), circleColor("#FFB000"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
             loaded.addSource(GeoJsonSource("boat", emptyCollection()))
             loaded.addLayer(CircleLayer("boat-circle", "boat").withProperties(circleRadius(10f), circleColor("#00D4FF"), circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
             map.cameraPosition = CameraPosition.Builder().target(LatLng(43.25, 5.15)).zoom(6.1).build()
             currentPoint?.let { loaded.getSourceAs<GeoJsonSource>("boat")?.setGeoJson(pointCollection(it)) }
-            updateDestinationLayer(); updateRouteLayer(); updateTrackLayer()
+            updateDestinationLayer()
+            updateRouteLayer()
+            updateTrackLayer()
+            updateFishingSpotsLayer()
         }
     }
 
@@ -46,7 +64,8 @@ on = LinearLayout.HORIZONTAL; setBackgroundColor(Color.argb(248, 7, 27, 42)) }
             return
         }
         if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            gpsText.text = "GPS\nDésactivé"; return
+            gpsText.text = "GPS\nDésactivé"
+            return
         }
         gpsText.text = "GPS\nRecherche"
         runCatching {
@@ -54,6 +73,7 @@ on = LinearLayout.HORIZONTAL; setBackgroundColor(Color.argb(248, 7, 27, 42)) }
             locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let(::onLocationChanged)
         }.onFailure { gpsText.text = "GPS\nIndisponible" }
     }
+
     private fun hasLocation() = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     override fun onLocationChanged(location: Location) {
@@ -66,7 +86,11 @@ on = LinearLayout.HORIZONTAL; setBackgroundColor(Color.argb(248, 7, 27, 42)) }
         speedText.text = "VITESSE\n${format(knots, 1)} nd"
         val filtered = headingFilter.update(if (location.hasBearing()) location.bearing.toDouble() else null, knots, System.currentTimeMillis())
         headingText.text = if (knots < 1.0) "CAP GPS\n—\nImmobile" else "CAP GPS\n${filtered?.let { "%03.0f°".format(it) } ?: "—"}"
-        gpsText.text = when { location.accuracy <= 8 -> "GPS\nPrécis ±${location.accuracy.toInt()} m"; location.accuracy <= 25 -> "GPS\nMoyen ±${location.accuracy.toInt()} m"; else -> "GPS\nFaible ±${location.accuracy.toInt()} m" }
+        gpsText.text = when {
+            location.accuracy <= 8 -> "GPS\nPrécis ±${location.accuracy.toInt()} m"
+            location.accuracy <= 25 -> "GPS\nMoyen ±${location.accuracy.toInt()} m"
+            else -> "GPS\nFaible ±${location.accuracy.toInt()} m"
+        }
         style?.getSourceAs<GeoJsonSource>("boat")?.setGeoJson(pointCollection(point))
         if (following) centerOn(location, false)
         updateNavigation(knots, location.accuracy.toDouble())
@@ -80,16 +104,70 @@ on = LinearLayout.HORIZONTAL; setBackgroundColor(Color.argb(248, 7, 27, 42)) }
         if (animate) map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 400) else map.cameraPosition = camera
     }
 
+    private fun centerOn(point: GeoPoint, zoom: Double = 15.0) {
+        if (!::map.isInitialized) return
+        following = false
+        map.animateCamera(
+            CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder().target(LatLng(point.latitude, point.longitude)).zoom(zoom).bearing(0.0).build()
+            ),
+            450
+        )
+    }
+
     private fun cycleOrientation() {
-        orientationMode = when (orientationMode) { OrientationMode.NORTH -> OrientationMode.COURSE; OrientationMode.COURSE -> OrientationMode.FREE; OrientationMode.FREE -> OrientationMode.NORTH }
+        orientationMode = when (orientationMode) {
+            OrientationMode.NORTH -> OrientationMode.COURSE
+            OrientationMode.COURSE -> OrientationMode.FREE
+            OrientationMode.FREE -> OrientationMode.NORTH
+        }
         orientationButton.text = orientationMode.label
         if (orientationMode == OrientationMode.NORTH) map.animateCamera(CameraUpdateFactory.bearingTo(0.0), 300)
+    }
+
+    private fun showFishingModeMenu() {
+        val items = arrayOf(
+            if (fishingMode) "Quitter le mode pêche" else "Activer le mode pêche",
+            "Enregistrer ma position comme spot",
+            "Enregistrer le point carte comme spot",
+            "Mes spots de pêche",
+            "Dernières routes pêche",
+            "Réglementation pêche ici"
+        )
+        AlertDialog.Builder(this).setTitle("MODE PÊCHE").setItems(items) { _, index ->
+            when (index) {
+                0 -> setFishingMode(!fishingMode)
+                1 -> currentPoint?.let(::saveFishingSpotDialog) ?: dialog("SPOT PÊCHE", "Position GPS indisponible.")
+                2 -> destination?.let(::saveFishingSpotDialog) ?: dialog("SPOT PÊCHE", "Faites un appui long sur la carte pour choisir un point.")
+                3 -> showFishingSpots()
+                4 -> showRecentFishingRoutes()
+                5 -> showFishing()
+            }
+        }.show()
+    }
+
+    private fun setFishingMode(enabled: Boolean) {
+        fishingMode = enabled
+        getSharedPreferences("cap6", MODE_PRIVATE).edit().putBoolean("fishing_mode", enabled).apply()
+        modeBanner.visibility = if (enabled) View.VISIBLE else View.GONE
+        if (enabled && mapMode != MapMode.NIGHT) {
+            mapMode = MapMode.NIGHT
+            if (::map.isInitialized) loadStyle()
+        } else {
+            updateFishingSpotsLayer()
+        }
+        Toast.makeText(this, if (enabled) "Mode pêche activé" else "Mode pêche désactivé", Toast.LENGTH_SHORT).show()
     }
 
     private fun showFishing() {
         val point = currentPoint ?: return dialog("PÊCHE", "Position GPS indisponible.")
         val result = marineData?.fishingEngine?.evaluate(point, LocalDate.now()) ?: return dialog("PÊCHE", "Base locale indisponible.")
-        val title = when (result.status) { FishingStatus.ALLOWED -> "PÊCHE AUTORISÉE"; FishingStatus.REGULATED -> "PÊCHE RÉGLEMENTÉE"; FishingStatus.FORBIDDEN -> "PÊCHE INTERDITE"; else -> "INFORMATION INSUFFISANTE" }
+        val title = when (result.status) {
+            FishingStatus.ALLOWED -> "PÊCHE AUTORISÉE"
+            FishingStatus.REGULATED -> "PÊCHE RÉGLEMENTÉE"
+            FishingStatus.FORBIDDEN -> "PÊCHE INTERDITE"
+            else -> "INFORMATION INSUFFISANTE"
+        }
         val rules = result.matchingRules.joinToString("\n\n") { "${it.name}\n${it.ruleText}\nSource : ${it.sourceName}${it.legalReference?.let { r -> "\nRéférence : $r" } ?: ""}" }
         dialog(title, result.message + (if (rules.isBlank()) "" else "\n\n$rules") + "\n\nVérifiez l'arrêté en vigueur avant de pêcher.")
     }
