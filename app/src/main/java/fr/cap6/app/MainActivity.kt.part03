@@ -49,7 +49,7 @@ vityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCA
 
     private fun updateDestinationLayer() { style?.getSourceAs<GeoJsonSource>("destination")?.setGeoJson(destination?.let(::pointCollection) ?: emptyCollection()) }
     private fun updateRouteLayer() { style?.getSourceAs<GeoJsonSource>("route")?.setGeoJson(activeRoute?.points?.let(::lineCollection) ?: emptyCollection()) }
-    private fun updateTrackLayer() { style?.getSourceAs<GeoJsonSource>("track")?.setGeoJson(lineCollection(trackStore.load())) }
+    private fun updateTrackLayer() { style?.getSourceAs<GeoJsonSource>("track")?.setGeoJson(lineCollection(trackStore.load().map { it.position })) }
 
     private fun pointCollection(point: GeoPoint): String {
         val geometry = JSONObject().put("type", "Point").put("coordinates", JSONArray().put(point.longitude).put(point.latitude))
