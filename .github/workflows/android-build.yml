@@ -12,6 +12,8 @@ on:
   workflow_run:
     workflows: ["Build CAP 6 APK"]
     types: [completed]
+  schedule:
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
